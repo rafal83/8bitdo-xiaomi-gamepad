@@ -1,0 +1,18 @@
+# Entrees privees, dependances locales, firmwares generes et journaux.
+/local/
+
+# Environnements et caches Python.
+/.venv/
+/venv/
+__pycache__/
+*.py[cod]
+
+# Firmwares et bibliotheques binaires a fournir separement.
+*.bin
+*.dat
+*.dll
+*.exe
+*.lib
+
+# Archives generees.
+*.zip

@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "name": "Xiaomi - lettres identiques",
+  "buttons": {
+    "A": "A",
+    "B": "B",
+    "X": "X",
+    "Y": "Y",
+    "L": "L",
+    "R": "R",
+    "ZL": "ZL",
+    "ZR": "ZR",
+    "Back": "Moins",
+    "Start": "Plus",
+    "L3": "L3",
+    "R3": "R3",
+    "Mi": "Home"
+  },
+  "invert_axes": [],
+  "swap_sticks": false,
+  "mi_pulse": true,
+  "mi_pulse_ms": 120,
+  "battery": true,
+  "reconnect": true
+}
