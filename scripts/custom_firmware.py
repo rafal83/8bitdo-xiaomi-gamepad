@@ -28,11 +28,19 @@ DEFAULT_PROFILE = {
                 'L3': 'L3', 'R3': 'R3', 'Mi': 'Home'},
     'invert_axes': [], 'swap_sticks': False, 'mi_pulse': True,
     'mi_pulse_ms': 120, 'battery': True, 'reconnect': True,
+    'accelerometer': True, 'rumble': True,
+    'switch_rumble_gain': 200,
 }
 
 
 def validate_profile(value):
     """Reject ambiguous or forward-incompatible profiles before assembling anything."""
+    if type(value) is dict and 'switch_rumble_gain' not in value:
+        # Existing profiles retain their original motor strengths.
+        value = {**value, 'switch_rumble_gain': 100}
+    if type(value) is dict and set(value) == set(DEFAULT_PROFILE) - {'accelerometer', 'rumble'}:
+        # Preserve legacy firmware exactly, independently of new-profile defaults.
+        value = {**value, 'accelerometer': False, 'rumble': False}
     if type(value) is not dict or set(value) != set(DEFAULT_PROFILE):
         raise ValueError('Champs de profil inconnus ou manquants.')
     if type(value['schema']) is not int or value['schema'] != 1:
@@ -56,11 +64,14 @@ def validate_profile(value):
     if (type(axes) is not list or any(type(a) is not str or a not in AXES for a in axes)
             or len(set(axes)) != len(axes)):
         raise ValueError('Axes inconnus ou dupliques.')
-    for key in ('swap_sticks', 'mi_pulse', 'battery', 'reconnect'):
+    for key in ('swap_sticks', 'mi_pulse', 'battery', 'reconnect', 'accelerometer', 'rumble'):
         if type(value[key]) is not bool:
             raise ValueError(f'{key} doit etre un booleen.')
     if type(value['mi_pulse_ms']) is not int or not 40 <= value['mi_pulse_ms'] <= 1000:
         raise ValueError('La duree Mi doit etre un entier de 40 a 1000 ms.')
+    gain = value['switch_rumble_gain']
+    if type(gain) is not int or not 100 <= gain <= 300 or gain % 25:
+        raise ValueError('L’intensite des vibrations Switch doit aller de 100 a 300 %, par pas de 25 %.')
     result = deepcopy(value)
     result['buttons'] = deepcopy(buttons)
     result['name'] = result['name'].strip()
@@ -218,6 +229,26 @@ def build_profile(original, value):
                         'old': original[offset:offset+len(new)].hex(), 'new': new.hex(), 'reason': reason})
     if len(image) != len(original) or image[:0xec] != original[:0xec]:
         raise ValueError('Taille ou vecteurs modifies.')
+    from xiaomi_feedback import extend
+    image, feedback_edits = extend(bytes(image), original, profile, decoder_source(profile))
+    # Entry trampolines intentionally replace the first four bytes of an
+    # existing hook. Describe the final image with disjoint, accurate ranges.
+    by_address = {entry['address']: entry for entry in journal}
+    for entry in feedback_edits:
+        previous = by_address.get(entry['address'])
+        if previous is not None:
+            size = max(previous['length'], entry['length'])
+            offset = int(entry['offset'], 16)
+            entry = {**previous, **entry, 'length': size, 'new': image[offset:offset+size].hex()}
+        by_address[entry['address']] = entry
+    journal = list(by_address.values())
+    occupied = set()
+    for entry in journal:
+        offset = int(entry['offset'], 16)
+        span = set(range(offset, offset+entry['length']))
+        if occupied & span or image[offset:offset+entry['length']].hex() != entry['new']:
+            raise ValueError('Journal de modifications incohérent.')
+        occupied |= span
     return bytes(image), {'schema': 1, 'profile': profile, 'original_sha256': digest(original),
                           'patched_sha256': digest(image), 'edits': journal,
                           'injected_lengths': {'report': len(report), 'mi_pulse': len(home)},
@@ -232,7 +263,7 @@ def compile_profile(profile):
 
 
 def bundle_instructions(profile, checks):
-    return (
+    instructions = (
         f"Profil : {profile['name']}\nTouches : {mapping_summary(profile)}\n"
         f"Tests hors materiel : {checks} controles reussis.\n\n"
         "1. Lancer Configurer_Xiaomi.cmd a la racine du projet.\n"
@@ -244,6 +275,15 @@ def bundle_instructions(profile, checks):
         "Restaurer_Officiel.cmd a la racine restaure l'original.\n"
         "Sur Switch, remettre le remappage des touches a zero avant d'evaluer ce profil.\n"
         "La batterie pendant la decharge reste a valider sur votre materiel.\n")
+    if profile['accelerometer'] or profile['rumble']:
+        instructions += (
+            f"\nMouvement et vibrations : accelerometre={profile['accelerometer']}, vibrations={profile['rumble']}.\n"
+            f"Intensite des vibrations Switch : {profile['switch_rumble_gain']} % (100 % = niveau d'origine).\n"
+            "L'image occupe 1 Kio supplementaire ; la limite basse du stockage interne est relevee.\n"
+            "Des reglages memorises par le 8BitDo peuvent etre perdus lors du premier flash.\n"
+            "Les donnees d'acceleration sont brutes, sans gyroscope. Echelle et orientation a valider.\n"
+            "Les valeurs du capteur restent a valider sur materiel.\n")
+    return instructions
 
 
 def generate_bundle(value, progress=lambda message: None):

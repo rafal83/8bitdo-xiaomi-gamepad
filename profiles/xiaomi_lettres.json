@@ -21,5 +21,8 @@
   "mi_pulse": true,
   "mi_pulse_ms": 120,
   "battery": true,
-  "reconnect": true
+  "reconnect": true,
+  "accelerometer": true,
+  "rumble": true,
+  "switch_rumble_gain": 200
 }

@@ -70,8 +70,8 @@ try {
     }
     foreach ($file in $filesToCheck) {
         $bytes = [IO.File]::ReadAllBytes($file)
-        $expected = @(207, 0x08003400, 0x18800, 0, 0, 0, 0)
-        if ($bytes.Length -ne 100380) { throw "Taille DAT incorrecte : $file" }
+        if ($bytes.Length -notin @(100380, 101404)) { throw "Taille DAT incorrecte : $file" }
+        $expected = @(207, 0x08003400, ($bytes.Length-28), 0, 0, 0, 0)
         for ($i = 0; $i -lt 7; $i++) {
             if ([BitConverter]::ToUInt32($bytes, 4 * $i) -ne $expected[$i]) {
                 throw "Entete DAT incorrect : $file"

@@ -26,7 +26,9 @@ def validate_image(image, profile):
     fixture = bytes(reference.uc.mem_read(0x20000000, 0x4000))
     check(bytes(candidate.uc.mem_read(0x20000000, 0x4000)) == fixture, 'initial_RAM_identical')
     check(image[:0xec] == reference.image[:0xec], 'vectors_identical')
-    check(len(image) == len(reference.image), 'image_length_identical')
+    from xiaomi_feedback import enabled
+    feedback = enabled(profile)
+    check(len(image) == len(reference.image) + (1024 if feedback else 0), 'image_length_identical')
     check(struct.unpack_from('<I', image, 0xfc)[0] == STATE, 'runtime_stack_reserved')
 
     def reset(e, kind=24, mode=0x30):
@@ -43,10 +45,17 @@ def validate_image(image, profile):
                 uc.reg_write(UC_ARM_REG_SP, STATE)
                 started = True
         h = e.uc.hook_add(UC_HOOK_CODE, stack)
+        def bluetooth(uc, pc, size, data):
+            if pc in (0x080143e8, 0x08015ef8):
+                uc.reg_write(UC_ARM_REG_R0, 0x40 if pc == 0x080143e8 else 0)
+                uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
+        bt_hook = e.uc.hook_add(UC_HOOK_CODE, bluetooth) if feedback else None
         try:
             result = e.call(address, *args)
         finally:
             e.uc.hook_del(h)
+            if bt_hook is not None:
+                e.uc.hook_del(bt_hook)
         check(e.saved_ok and e.uc.reg_read(UC_ARM_REG_SP) == STATE, 'ABI_real_runtime_stack')
         return result
 
@@ -242,6 +251,9 @@ def validate_image(image, profile):
     check(reconnect(candidate, 24) == (0 if profile['reconnect'] else 1), 'reconnect_option')
     for kind in kinds:
         check(reconnect(candidate, kind) == reconnect(reference, kind), 'other_controller_reconnect_unchanged')
+    if feedback:
+        from validate_feedback import validate_feedback
+        checks.update(validate_feedback(image, profile))
     return {'status': 'offline_passed', 'hardware_validated': False,
             'total_checks': sum(checks.values()), 'checks': dict(checks),
             'limits': 'ARM emulation with mocked USB transport. Hardware profile, radio timing and battery discharge not validated.'}

@@ -37,8 +37,10 @@ def rebuild(dat,original,modified):
     if c.decrypt_section(dat,s,cipher)!=original:raise ValueError('Original BIN is not the DAT plaintext')
     def encode(payload):return c.build_section(payload,cipher,s['id'],addr=s['addr'],length=s['payload_len'],pid=s['pid'])
     if encode(original)!=dat:raise ValueError('Original DAT roundtrip failed')
-    if len(modified)!=len(original):raise ValueError('Size must remain unchanged')
-    result=encode(modified)
-    if result[:28]!=dat[:28] or len(result)!=len(dat):raise ValueError('Header/length changed')
+    if len(modified) not in (len(original), len(original)+1024):
+        raise ValueError('Only the stock size or the bounded 1 KiB feedback extension is accepted')
+    result=c.build_section(modified,cipher,s['id'],addr=s['addr'],length=len(modified),pid=s['pid'])
+    if result[:8]!=dat[:8] or result[12:28]!=dat[12:28] or len(result)!=len(modified)+28:
+        raise ValueError('Unexpected header/length change')
     if c.decrypt_section(result,c.parse_image(result)[0],cipher)!=modified:raise ValueError('Modified DAT roundtrip failed')
     return result

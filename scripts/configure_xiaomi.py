@@ -9,6 +9,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
+from controller_test_ui import ControllerTestPanel
 
 from custom_firmware import (ROOT, AXES, TARGET_BITS, DEFAULT_PROFILE, generate_bundle,
                              load_profile, mapping_summary, validate_profile, write_json, triggers_remapped)
@@ -31,7 +32,8 @@ class Configurator:
     PAGE_TITLES = [('Boutons', 'Choisissez une disposition ou cliquez sur un bouton de la manette.'),
                    ('Sticks', 'Adaptez le sens des axes à votre façon de jouer.'),
                    ('Options', 'Réglez le bouton Mi, la batterie et la reconnexion.'),
-                   ('Installer le profil', 'Préparez votre adaptateur, puis lancez le transfert.')]
+                   ('Installer le profil', 'Préparez votre adaptateur, puis lancez le transfert.'),
+                   ('Tester la manette', 'Vérifiez les commandes reçues et testez les moteurs de vibration.')]
     BUTTON_NAMES = {'Back': 'Back / Select', 'Start': 'Start', 'L3': 'Clic du stick gauche',
                     'R3': 'Clic du stick droit', 'Mi': 'Bouton central Mi',
                     'ZL': 'Gâchette gauche', 'ZR': 'Gâchette droite'}
@@ -51,6 +53,7 @@ class Configurator:
         self.generated_profile = None
         self.last_flash_exit_code = None
         self.last_probe_exit_code = None
+        self.tester = None
         self.events = queue.Queue()
         self.setup_style()
         root.title('Xiaomi · Configurateur 8BitDo')
@@ -69,6 +72,9 @@ class Configurator:
         self.duration = tk.StringVar()
         self.battery = tk.BooleanVar()
         self.reconnect = tk.BooleanVar()
+        self.accelerometer = tk.BooleanVar()
+        self.rumble = tk.BooleanVar()
+        self.switch_rumble_gain = tk.StringVar()
         self.mapping_text = tk.StringVar()
         self.selected_button = tk.StringVar(value='A')
         self.selected_title = tk.StringVar()
@@ -110,12 +116,14 @@ class Configurator:
         self.build_sticks_tab(self.pages[1])
         self.build_options_tab(self.pages[2])
         self.build_flash_tab(self.pages[3])
+        self.tester = ControllerTestPanel(self, self.pages[4])
         self.notebook.bind('<<NotebookTabChanged>>', self.on_page_changed)
         self.build_footer()
         self.selected_button.trace_add('write', self.on_button_selected)
         self.set_profile(DEFAULT_PROFILE)
         variables = [self.name, *self.buttons.values(), *self.axes.values(), self.swap,
-                     self.pulse, self.duration, self.battery, self.reconnect]
+                     self.pulse, self.duration, self.battery, self.reconnect, self.accelerometer, self.rumble,
+                     self.switch_rumble_gain]
         for variable in variables:
             variable.trace_add('write', self.on_profile_changed)
         self.on_button_selected()
@@ -123,7 +131,7 @@ class Configurator:
         self.show_page(0)
         root.bind('<MouseWheel>', self.scroll_page, add='+')
         root.protocol('WM_DELETE_WINDOW', self.close)
-        root.after(100, self.poll_events)
+        self.poll_timer = root.after(100, self.poll_events)
 
     def setup_style(self):
         c = self.COLORS
@@ -206,7 +214,7 @@ class Configurator:
         navigation = tk.Frame(sidebar, background=c['nav'])
         navigation.grid(row=2, column=0, sticky='ew', padx=10)
         self.nav_buttons = []
-        for index, title in enumerate(('01   Boutons', '02   Sticks', '03   Options', '04   Installer')):
+        for index, title in enumerate(('01   Boutons', '02   Sticks', '03   Options', '04   Installer', '05   Tester')):
             button = ttk.Button(navigation, text=title, style='Nav.TButton', command=lambda i=index: self.show_page(i))
             button.pack(fill='x', pady=3)
             self.nav_buttons.append(button)
@@ -256,6 +264,8 @@ class Configurator:
         return content
 
     def show_page(self, index):
+        if index != 4 and self.tester is not None and self.tester.session is not None:
+            self.tester.stop()
         self.notebook.select(index)
         self.on_page_changed()
 
@@ -466,13 +476,28 @@ class Configurator:
         self.duration_input = ttk.Spinbox(duration, from_=40, to=1000, increment=10, textvariable=self.duration, width=6)
         self.duration_input.pack(side='left')
         ttk.Label(duration, text='ms · conseillé : 120', style='CardMuted.TLabel').pack(side='left', padx=10)
-        battery = self.card(frame, 'Niveau de batterie', 'Affichage par paliers. L’évolution pendant la décharge reste à vérifier.')
-        battery.pack(fill='x', pady=(0, 12))
+        columns = ttk.Frame(frame)
+        columns.pack(fill='x', pady=(0, 12))
+        columns.columnconfigure((0, 1), weight=1, uniform='options')
+        battery = self.card(columns, 'Niveau de batterie')
+        battery.grid(row=0, column=0, sticky='nsew', padx=(0, 6))
         ttk.Checkbutton(battery, text='Afficher la batterie de la manette sur Switch', variable=self.battery, style='Card.TCheckbutton').pack(anchor='w')
-        reconnect = self.card(frame, 'Retrouver sa manette')
-        reconnect.pack(fill='x')
-        ttk.Checkbutton(reconnect, text='Activer la correction de reconnexion Xiaomi', variable=self.reconnect, style='Card.TCheckbutton').pack(anchor='w', pady=(8, 0))
-        ttk.Label(reconnect, text='Pour se reconnecter après avoir éteint puis rallumé la manette.', style='CardMuted.TLabel', wraplength=620).pack(anchor='w', pady=(6, 0))
+        ttk.Label(battery, text='Affichage par paliers ; décharge à vérifier.', style='CardMuted.TLabel', wraplength=320).pack(anchor='w', pady=(6, 0))
+        reconnect = self.card(columns, 'Retrouver sa manette')
+        reconnect.grid(row=0, column=1, sticky='nsew', padx=(6, 0))
+        ttk.Checkbutton(reconnect, text='Corriger la reconnexion Xiaomi', variable=self.reconnect, style='Card.TCheckbutton').pack(anchor='w')
+        ttk.Label(reconnect, text='Pour se reconnecter après un arrêt de la manette.', style='CardMuted.TLabel', wraplength=320).pack(anchor='w', pady=(6, 0))
+        feedback = self.card(frame, 'Mouvement et vibrations')
+        feedback.pack(fill='x')
+        ttk.Checkbutton(feedback, text='Transmettre l’accéléromètre à la Switch', variable=self.accelerometer, style='Card.TCheckbutton').pack(anchor='w')
+        vibrations = ttk.Frame(feedback, style='Card.TFrame')
+        vibrations.pack(fill='x')
+        ttk.Checkbutton(vibrations, text='Activer les vibrations (Switch et XInput)', variable=self.rumble, style='Card.TCheckbutton').pack(side='left')
+        ttk.Label(vibrations, text='Intensité Switch (%)', style='Card.TLabel').pack(side='left', padx=(20, 8))
+        ttk.Spinbox(vibrations, from_=100, to=300, increment=25, textvariable=self.switch_rumble_gain, width=5).pack(side='left')
+        ttk.Label(feedback, text='Accélérations brutes sur 3 axes, sans gyroscope. Échelle et orientation à valider.\n'
+                  'Ces options agrandissent le firmware : des réglages internes mémorisés par le 8BitDo peuvent être perdus.',
+                  style='CardMuted.TLabel', wraplength=760).pack(anchor='w', pady=(6, 0))
 
     def preset(self, letters):
         # Face-button presets preserve custom Mi, shoulder and menu mappings.
@@ -568,13 +593,17 @@ class Configurator:
                                     f'{mapping_summary(self.generated_profile).replace(" -> ", " → ")}\n'
                                     'Firmware généré et vérifié. Prêt à installer.'
                                     + ('\nGâchettes remappées : mode numérique sur Switch.'
-                                       if triggers_remapped(self.generated_profile) else ''))
+                                       if triggers_remapped(self.generated_profile) else '')
+                                    + ('\nCapteurs/vibrations : réglages internes du 8BitDo susceptibles d’être perdus.'
+                                       if self.generated_profile['accelerometer'] or self.generated_profile['rumble'] else ''))
             else:
                 self.status.set('Vos réglages ont changé. Préparez à nouveau le firmware avant de l’installer.')
                 self.flash_info.set('Les réglages ont changé. Le dernier fichier généré ne correspond plus à ce profil.')
                 self.ready_text.set('Vos réglages ont changé. Préparez un nouveau firmware pour installer ce profil.')
 
     def start_job(self, operation):
+        if self.tester is not None:
+            self.tester.stop()
         self.busy = True
         self.operation = operation
         self.disabled_widgets = []
@@ -665,17 +694,26 @@ class Configurator:
         self.duration.set(str(profile['mi_pulse_ms']))
         self.battery.set(profile['battery'])
         self.reconnect.set(profile['reconnect'])
+        self.accelerometer.set(profile['accelerometer'])
+        self.rumble.set(profile['rumble'])
+        self.switch_rumble_gain.set(str(profile['switch_rumble_gain']))
 
     def get_profile(self):
         try:
             duration = int(self.duration.get())
         except ValueError:
             raise ValueError('La durée Mi doit être un entier de 40 à 1000 ms.') from None
+        try:
+            gain = int(self.switch_rumble_gain.get())
+        except ValueError:
+            raise ValueError('L’intensité Switch doit être un entier de 100 à 300 %.') from None
         return validate_profile({'schema': 1, 'name': self.name.get(),
             'buttons': {name: variable.get() for name, variable in self.buttons.items()},
             'invert_axes': [a for a, var in self.axes.items() if var.get()],
             'swap_sticks': self.swap.get(), 'mi_pulse': self.pulse.get(),
-            'mi_pulse_ms': duration, 'battery': self.battery.get(), 'reconnect': self.reconnect.get()})
+            'mi_pulse_ms': duration, 'battery': self.battery.get(), 'reconnect': self.reconnect.get(),
+            'accelerometer': self.accelerometer.get(), 'rumble': self.rumble.get(),
+            'switch_rumble_gain': gain})
 
     def open_profile(self):
         path = filedialog.askopenfilename(parent=self.root, title='Ouvrir un profil Xiaomi',
@@ -778,7 +816,7 @@ class Configurator:
                     messagebox.showerror('Génération impossible', value, parent=self.root)
         except queue.Empty:
             pass
-        self.root.after(100, self.poll_events)
+        self.poll_timer = self.root.after(100, self.poll_events)
 
     def open_output(self):
         if not self.busy and self.current_matches_output():
@@ -788,6 +826,8 @@ class Configurator:
         if self.busy:
             self.status.set('Opération en cours : attendez sa fin avant de fermer la fenêtre.')
         else:
+            self.tester.stop()
+            self.root.after_cancel(self.poll_timer)
             self.root.destroy()
 
 

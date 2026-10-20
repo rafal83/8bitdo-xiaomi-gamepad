@@ -26,7 +26,7 @@ public sealed class FakeBootHid : IBootHid {
         else if(Sent == 3) {
             expected[5]=1; payload=28;
             Buffer.BlockCopy(dat, 0, expected, 8, 28);
-        } else if(Blocks < 3136) {
+        } else if(Blocks < (dat.Length-28)/32) {
             payload=32;
             Buffer.BlockCopy(dat, 28+32*Blocks, expected, 8, 32);
             Blocks++;
@@ -88,26 +88,33 @@ public static class NativeFlasherTests {
         uint[] header={207,0x08003400,0x18800,0,0,0,0};
         for(int i=0;i<7;i++) Buffer.BlockCopy(BitConverter.GetBytes(header[i]),0,dat,i*4,4);
         for(int i=28;i<dat.Length;i++) dat[i]=(byte)((i*17+i/127)&255);
-        string[] scenarios={"success","version8","ack_variant","wrong_version","bad_version",
+        string[] scenarios={"success","extended","version8","ack_variant","wrong_version","bad_version",
             "empty_id","bad_id","header_nak","data_nak","data_timeout","final_nak_gone",
             "final_bad_gone","final_timeout_present","final_timeout_gone","final_io_gone","final_status_ack","final_status_bad"};
         foreach(string scenario in scenarios) {
-            var hid=new FakeBootHid(scenario,dat);
+            byte[] input=dat;
+            if(scenario=="extended") {
+                input=new byte[101404]; Buffer.BlockCopy(dat,0,input,0,dat.Length);
+                Buffer.BlockCopy(BitConverter.GetBytes((uint)101376),0,input,8,4);
+                for(int i=dat.Length;i<input.Length;i++) input[i]=(byte)(i*13);
+            }
+            var hid=new FakeBootHid(scenario,input);
             var progress=new List<int>();
             Exception failure=null;
-            try { NativeBootProtocol.Transfer(hid,dat,delegate(int p) {
+            try { NativeBootProtocol.Transfer(hid,input,delegate(int p) {
                 Require(p != 100 || hid.Committed, "100 before commit");
                 Require(progress.Count == 0 || p > progress[progress.Count-1], "progress order");
                 progress.Add(p);
             }); } catch(Exception e) { failure=e; }
             if(failure != null && failure.Message.StartsWith("MOCK:")) throw failure;
-            bool success=scenario=="success" || scenario=="version8" || scenario=="ack_variant" ||
+            bool success=scenario=="success" || scenario=="extended" || scenario=="version8" || scenario=="ack_variant" ||
                          scenario=="final_timeout_gone" || scenario=="final_io_gone" || scenario=="final_status_ack";
             Require((failure==null)==success, "unexpected outcome: "+scenario+" "+failure);
             Require(progress.Contains(100)==success, "wrong completion: "+scenario);
             if(success) {
-                Require(hid.Sent==3141 && hid.Blocks==3136 && hid.Encoded && hid.Committed, "incomplete transfer");
-                Require(hid.Received==3140, "unexpected ACK count");
+                int blockCount=(input.Length-28)/32;
+                Require(hid.Sent==blockCount+5 && hid.Blocks==blockCount && hid.Encoded && hid.Committed, "incomplete transfer");
+                Require(hid.Received==blockCount+4, "unexpected ACK count");
             }
             if(scenario=="wrong_version" || scenario=="empty_id" || scenario=="bad_id")
                 Require(hid.Sent==2, "header sent before identification accepted");
@@ -137,7 +144,7 @@ public static class NativeFlasherTests {
         int[] sizes={12,64,IntPtr.Size==8?32:20,IntPtr.Size==8?32:28};
         for(int i=0;i<names.Length;i++)
             Require(Marshal.SizeOf(typeof(WindowsBootHid).GetNestedType(names[i],flags))==sizes[i],"ABI "+names[i]);
-        Console.WriteLine("17 protocol scenarios, 8 invalid DATs, SHA guard and Windows ABI passed ("+(IntPtr.Size*8)+" bits). No USB opened.");
+        Console.WriteLine("18 protocol scenarios, 8 invalid DATs, SHA guard and Windows ABI passed ("+(IntPtr.Size*8)+" bits). No USB opened.");
     }
 }
 '@

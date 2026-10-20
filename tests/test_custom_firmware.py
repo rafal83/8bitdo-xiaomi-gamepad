@@ -6,6 +6,7 @@ import shutil
 import sys
 import time
 import uuid
+import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import custom_firmware as c
@@ -58,7 +59,9 @@ def main():
 
     # Old JSON profiles continue to produce the exact hardware-tested firmware.
     letters = c.load_profile(c.ROOT / 'profiles/xiaomi_lettres.json')
+    letters.update(accelerometer=False, rumble=False)
     legacy = deepcopy(letters)
+    del legacy['accelerometer']; del legacy['rumble']
     del legacy['buttons']['ZL']; del legacy['buttons']['ZR']
     assert c.validate_profile(legacy) == letters
     assert c.digest(c.compile_profile(legacy)[1]) == '87c30630799b873073d7b80bfc9c2949408f3f4bce427dedcc18bbc9b93ff278'
@@ -138,7 +141,7 @@ def main():
     assert c.verify_bundle(folder / 'manifest.json')['status'] == 'verified'
     # Create isolated copies containing no flash launcher, then prove modified
     # payloads are refused even if the manifest's SHA is updated to match them.
-    tests = c.ROOT / 'local/test_results/cases' / uuid.uuid4().hex[:8]
+    tests = c.BUNDLE_ROOT / 'cases' / uuid.uuid4().hex[:8]
     tests.mkdir(parents=True)
     for kind in ('dat', 'bin', 'profile', 'manifest_hash', 'dat_and_hash', 'checks'):
         case = tests / kind
@@ -199,9 +202,10 @@ def main():
     result['total_ARM_checks'] = sum(p['checks'] for p in result['profiles'])
     result['status'] = 'offline_passed'
     result['hardware_flashed'] = False
-    c.write_json(c.ROOT / 'local/test_results/configurator_validation.json', result)
     print(json.dumps(result, ensure_ascii=True, indent=2))
 
 
 if __name__ == '__main__':
-    main()
+    with tempfile.TemporaryDirectory(prefix='8bitdo_profiles_') as directory:
+        c.BUNDLE_ROOT = Path(directory)
+        main()

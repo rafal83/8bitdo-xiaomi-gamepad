@@ -90,8 +90,8 @@ public static class NativeBootProtocol {
     }
 
     public static void ValidateDat(byte[] dat) {
-        uint[] header = {207, 0x08003400, 0x18800, 0, 0, 0, 0};
-        if(dat == null || dat.Length != 100380) throw new InvalidDataException("Taille DAT incorrecte.");
+        if(dat == null || (dat.Length != 100380 && dat.Length != 101404)) throw new InvalidDataException("Taille DAT incorrecte.");
+        uint[] header = {207, 0x08003400, (uint)(dat.Length-28), 0, 0, 0, 0};
         for(int i = 0; i < header.Length; i++)
             if(BitConverter.ToUInt32(dat, i*4) != header[i])
                 throw new InvalidDataException("Seul le DAT 2.07 de cet adaptateur est accepte.");
