@@ -206,19 +206,34 @@ b.w 0x0800c272
         # Amplify only Xiaomi's Switch dispatch, after the stock HD conversion.
         # Integer percentage, saturating to 255; a zero command remains zero.
         gain = profile['switch_rumble_gain']
+        minimum = (profile['switch_rumble_minimum']*255+50)//100
+        # Use the compact form when the floor needs space in the same 64-byte
+        # slot. With a zero floor, retain existing firmware bytes exactly.
+        multiply = ('muls r2, r0\nmuls r1, r0' if minimum else
+                    'mul r2, r2, r0\nmul r1, r1, r0')
         # Percentages in 25-point steps give an exact division by four, using
         # only instructions already supported by this Thumb-2 ROM/toolchain.
         boost = '' if gain == 100 else f'''movs r0, #{gain//25}
-mul r2, r2, r0
-mul r1, r1, r0
+{multiply}
 lsrs r2, r2, #2
 lsrs r1, r1, #2
 usat r2, #8, r2
 usat r1, #8, r1
 '''
+        floor = '' if not minimum else f'''cbz r1, small_done
+cmp r1, #{minimum}
+it lo
+movlo r1, #{minimum}
+small_done:
+cbz r2, big_done
+cmp r2, #{minimum}
+it lo
+movlo r2, #{minimum}
+big_done:
+'''
         code(SWITCH_DISPATCH, f'''cmp r0, #0x18
 bne stock_switch
-{boost}mov r0, r2
+{boost}{floor}mov r0, r2
 bl {RUMBLE:#x}
 b.w 0x0800a734
 stock_switch:

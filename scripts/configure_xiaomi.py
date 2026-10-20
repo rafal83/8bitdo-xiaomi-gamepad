@@ -75,6 +75,7 @@ class Configurator:
         self.accelerometer = tk.BooleanVar()
         self.rumble = tk.BooleanVar()
         self.switch_rumble_gain = tk.StringVar()
+        self.switch_rumble_minimum = tk.StringVar()
         self.mapping_text = tk.StringVar()
         self.selected_button = tk.StringVar(value='A')
         self.selected_title = tk.StringVar()
@@ -123,7 +124,7 @@ class Configurator:
         self.set_profile(DEFAULT_PROFILE)
         variables = [self.name, *self.buttons.values(), *self.axes.values(), self.swap,
                      self.pulse, self.duration, self.battery, self.reconnect, self.accelerometer, self.rumble,
-                     self.switch_rumble_gain]
+                     self.switch_rumble_gain, self.switch_rumble_minimum]
         for variable in variables:
             variable.trace_add('write', self.on_profile_changed)
         self.on_button_selected()
@@ -488,13 +489,20 @@ class Configurator:
         ttk.Checkbutton(reconnect, text='Corriger la reconnexion Xiaomi', variable=self.reconnect, style='Card.TCheckbutton').pack(anchor='w')
         ttk.Label(reconnect, text='Pour se reconnecter après un arrêt de la manette.', style='CardMuted.TLabel', wraplength=320).pack(anchor='w', pady=(6, 0))
         feedback = self.card(frame, 'Mouvement et vibrations')
+        feedback.configure(padding=10)
         feedback.pack(fill='x')
         ttk.Checkbutton(feedback, text='Transmettre l’accéléromètre à la Switch', variable=self.accelerometer, style='Card.TCheckbutton').pack(anchor='w')
         vibrations = ttk.Frame(feedback, style='Card.TFrame')
         vibrations.pack(fill='x')
         ttk.Checkbutton(vibrations, text='Activer les vibrations (Switch et XInput)', variable=self.rumble, style='Card.TCheckbutton').pack(side='left')
-        ttk.Label(vibrations, text='Intensité Switch (%)', style='Card.TLabel').pack(side='left', padx=(20, 8))
-        ttk.Spinbox(vibrations, from_=100, to=300, increment=25, textvariable=self.switch_rumble_gain, width=5).pack(side='left')
+        levels = ttk.Frame(feedback, style='Card.TFrame')
+        levels.pack(fill='x', pady=(2, 0))
+        ttk.Label(levels, text='Intensité Switch (%)', style='Card.TLabel').pack(side='left', padx=(0, 8))
+        ttk.Spinbox(levels, from_=100, to=300, increment=25, textvariable=self.switch_rumble_gain, width=5).pack(side='left')
+        ttk.Label(levels, text='Minimum effets faibles (%)', style='Card.TLabel').pack(side='left', padx=(20, 8))
+        ttk.Spinbox(levels, from_=0, to=100, increment=10, textvariable=self.switch_rumble_minimum, width=5).pack(side='left')
+        ttk.Label(feedback, text='Minimum : renforce les effets non nuls ; 0 % désactive ce réglage.',
+                  style='CardMuted.TLabel').pack(anchor='w')
         ttk.Label(feedback, text='Accélérations brutes sur 3 axes, sans gyroscope. Échelle et orientation à valider.\n'
                   'Ces options agrandissent le firmware : des réglages internes mémorisés par le 8BitDo peuvent être perdus.',
                   style='CardMuted.TLabel', wraplength=760).pack(anchor='w', pady=(6, 0))
@@ -697,6 +705,7 @@ class Configurator:
         self.accelerometer.set(profile['accelerometer'])
         self.rumble.set(profile['rumble'])
         self.switch_rumble_gain.set(str(profile['switch_rumble_gain']))
+        self.switch_rumble_minimum.set(str(profile['switch_rumble_minimum']))
 
     def get_profile(self):
         try:
@@ -707,13 +716,17 @@ class Configurator:
             gain = int(self.switch_rumble_gain.get())
         except ValueError:
             raise ValueError('L’intensité Switch doit être un entier de 100 à 300 %.') from None
+        try:
+            minimum = int(self.switch_rumble_minimum.get())
+        except ValueError:
+            raise ValueError('Le minimum Switch doit être un entier de 0 à 100 %.') from None
         return validate_profile({'schema': 1, 'name': self.name.get(),
             'buttons': {name: variable.get() for name, variable in self.buttons.items()},
             'invert_axes': [a for a, var in self.axes.items() if var.get()],
             'swap_sticks': self.swap.get(), 'mi_pulse': self.pulse.get(),
             'mi_pulse_ms': duration, 'battery': self.battery.get(), 'reconnect': self.reconnect.get(),
             'accelerometer': self.accelerometer.get(), 'rumble': self.rumble.get(),
-            'switch_rumble_gain': gain})
+            'switch_rumble_gain': gain, 'switch_rumble_minimum': minimum})
 
     def open_profile(self):
         path = filedialog.askopenfilename(parent=self.root, title='Ouvrir un profil Xiaomi',

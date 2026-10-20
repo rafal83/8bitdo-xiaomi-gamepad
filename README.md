@@ -97,6 +97,13 @@ d'origine. Chaque moteur reste limité à 255 et une commande d'arrêt reste à 
 Ce gain ne modifie pas les vibrations XInput et ne garantit pas une force physique
 proportionnelle au pourcentage. Les anciens profils sans ce réglage gardent 100 %.
 Après un changement, préparer et flasher le profil pour l'appliquer à l'adaptateur.
+Si les tests moteurs sont forts mais les effets en jeu trop faibles, le réglage
+**Minimum effets faibles (%)** impose un plancher à chaque moteur demandé non nul,
+après le gain. Par exemple, 60 % impose au moins 153/255, tout en conservant zéro
+pour un moteur arrêté. Cela renforce les petits effets, au prix de nuances moins
+marquées entre eux. La plage est 0 à 100 % ; 0 % désactive ce plancher et préserve
+les firmwares déjà générés. Ce minimum ne concerne pas XInput.
+Le renforcement des effets faibles a été confirmé en jeu par l'utilisateur sur la Xiaomi.
 Cette version corrige aussi le retour au code d'origine pour les autres manettes
 dans les chemins de vibration. Les firmwares avec vibrations préparés par une
 version précédente doivent être régénérés avant leur flash ; leurs profils JSON
@@ -203,7 +210,7 @@ session graphique Windows et suppriment leurs firmwares temporaires à la fin.
 Le quatrième couvre les rapports d'entrée/sortie, l'arrêt automatique des moteurs,
 les déconnexions, les variantes du firmware et leurs hooks ARM. Il vérifie les
 neuf gains Switch de 100 à 300 %, les 256 niveaux de chaque moteur, la saturation,
-l'arrêt à zéro et les retours au code d'origine pour les autres manettes. Les protocoles et
+l'arrêt à zéro, le minimum des effets faibles et les retours au code d'origine pour les autres manettes. Les protocoles et
 processus sont simulés dans ces tests. Les résultats s'affichent dans le terminal.
 
 L'updater est une implémentation indépendante du protocole décrit dans le

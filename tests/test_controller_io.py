@@ -17,6 +17,7 @@ import controller_io as io
 import custom_firmware as firmware
 from configure_xiaomi import Configurator
 from validate_custom_firmware import validate_image
+from validate_feedback import validate_feedback
 
 
 class ProtocolTests(unittest.TestCase):
@@ -103,6 +104,26 @@ class ProtocolTests(unittest.TestCase):
 
 
 class FirmwareTests(unittest.TestCase):
+    def test_switch_minimum_levels_and_legacy_binary(self):
+        for invalid in (-1, 101, 60.0, True, '60', None):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                firmware.validate_profile(dict(firmware.DEFAULT_PROFILE, switch_rumble_minimum=invalid))
+        old = firmware.load_profile(firmware.ROOT / 'profiles/xiaomi_lettres.json')
+        old['switch_rumble_gain'] = 300
+        old.pop('switch_rumble_minimum', None)
+        self.assertEqual(firmware.validate_profile(old)['switch_rumble_minimum'], 0)
+        self.assertEqual(firmware.digest(firmware.compile_profile(old)[1]),
+                         '97546033da3f2c5fcde0669e31a8b5ad4e6b8ba6dcfe41834e7ee84e36e292f1')
+        for gain in range(100, 301, 25):
+            for minimum in (1, 60, 100):
+                with self.subTest(gain=gain, minimum=minimum):
+                    profile = dict(firmware.DEFAULT_PROFILE, accelerometer=False,
+                                   switch_rumble_gain=gain, switch_rumble_minimum=minimum)
+                    image, _, _ = firmware.compile_profile(profile)
+                    checks = validate_feedback(image, profile)
+                    self.assertEqual(checks['Switch_gain_all_levels_independent_and_saturated'], 256)
+                    self.assertEqual(checks['Switch_gain_zero_stops_both_motors'], 1)
+
     def test_switch_gain_range_and_validation(self):
         for invalid in (99, 301, 199, 200.0, True, '200', None):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
@@ -119,7 +140,7 @@ class FirmwareTests(unittest.TestCase):
 
     def test_profile_without_gain_retains_original_strength_and_validates(self):
         profile = firmware.load_profile(firmware.ROOT / 'profiles/xiaomi_lettres.json')
-        profile.pop('switch_rumble_gain')
+        profile.pop('switch_rumble_gain'); profile.pop('switch_rumble_minimum', None)
         self.assertEqual(firmware.validate_profile(profile)['switch_rumble_gain'], 100)
         with tempfile.TemporaryDirectory(prefix='8bitdo_old_feedback_') as directory:
             with patch.object(firmware, 'BUNDLE_ROOT', Path(directory)):
@@ -128,6 +149,7 @@ class FirmwareTests(unittest.TestCase):
                                  firmware.compile_profile(dict(profile, switch_rumble_gain=100))[1])
                 manifest = json.loads((folder / 'manifest.json').read_text(encoding='utf-8'))
                 manifest['profile'].pop('switch_rumble_gain')
+                manifest['profile'].pop('switch_rumble_minimum')
                 firmware.write_json(folder / 'manifest.json', manifest)
                 firmware.write_json(folder / 'profile.json', profile)
                 self.assertEqual(firmware.verify_bundle(folder / 'manifest.json')['status'], 'verified')
@@ -158,7 +180,8 @@ class FirmwareTests(unittest.TestCase):
                 if advanced:
                     profile['buttons'].update(ZL='Home', ZR='A', Mi='Capture')
                     profile.update(invert_axes=list(firmware.AXES), swap_sticks=True,
-                                   mi_pulse_ms=513, battery=False, reconnect=False)
+                                   mi_pulse_ms=513, battery=False, reconnect=False,
+                                   switch_rumble_minimum=60)
                 image, dat, journal = firmware.compile_profile(profile)
                 spans = set()
                 for entry in journal['edits']:
@@ -177,7 +200,8 @@ class FirmwareTests(unittest.TestCase):
     def test_extended_bundle_verified_and_tamper_rejected(self):
         with tempfile.TemporaryDirectory(prefix='8bitdo_feedback_') as directory:
             with patch.object(firmware, 'BUNDLE_ROOT', Path(directory)):
-                profile = dict(firmware.DEFAULT_PROFILE, accelerometer=True, rumble=True)
+                profile = dict(firmware.DEFAULT_PROFILE, accelerometer=True, rumble=True,
+                               switch_rumble_minimum=60)
                 folder, _ = firmware.generate_bundle(profile)
                 self.assertEqual(firmware.verify_bundle(folder / 'manifest.json')['status'], 'verified')
                 self.assertIn('reglages memorises', (folder / 'README.txt').read_text(encoding='utf-8'))
@@ -276,16 +300,25 @@ class TesterUITests(unittest.TestCase):
         self.app.accelerometer.set(False); self.app.rumble.set(False)
         self.assertEqual(self.app.get_profile()['switch_rumble_gain'], 200)
         self.app.switch_rumble_gain.set('300')
+        self.assertEqual(self.app.get_profile()['switch_rumble_minimum'], 0)
+        self.app.switch_rumble_minimum.set('60')
         profile = self.app.get_profile()
         self.app.set_profile(firmware.DEFAULT_PROFILE)
         self.app.set_profile(profile)
         self.assertFalse(self.app.accelerometer.get() or self.app.rumble.get())
         self.assertEqual(self.app.get_profile()['switch_rumble_gain'], 300)
-        legacy = deepcopy(profile); legacy.pop('switch_rumble_gain')
+        self.assertEqual(self.app.get_profile()['switch_rumble_minimum'], 60)
+        legacy = deepcopy(profile); legacy.pop('switch_rumble_gain'); legacy.pop('switch_rumble_minimum')
         self.app.set_profile(legacy)
         self.assertEqual(self.app.get_profile()['switch_rumble_gain'], 100)
+        self.assertEqual(self.app.get_profile()['switch_rumble_minimum'], 0)
         for invalid in ('', 'no', '99', '301', '199'):
             self.app.switch_rumble_gain.set(invalid)
+            with self.assertRaises(ValueError):
+                self.app.get_profile()
+        self.app.switch_rumble_gain.set('200')
+        for invalid in ('', 'no', '-1', '101', '60.0'):
+            self.app.switch_rumble_minimum.set(invalid)
             with self.assertRaises(ValueError):
                 self.app.get_profile()
 

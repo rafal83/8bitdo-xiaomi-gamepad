@@ -222,9 +222,11 @@ def validate_feedback(image, profile):
             finally:
                 e.uc.hook_del(hook)
             gain = profile['switch_rumble_gain']
-            strength = lambda value: min(255, value*gain//100)
+            minimum = (profile['switch_rumble_minimum']*255+50)//100
+            def strength(value):
+                return max(minimum, min(255, value*gain//100)) if value else 0
             check(packets == [bytes((0x53, 0x20, strength(0x39), strength(0xa1)))], 'Switch_live_dispatch_to_Xiaomi')
-            if gain != 100:
+            if gain != 100 or minimum:
                 # Exercise the actual dispatch for every input level, with
                 # opposing motor strengths: zero, independent saturation and
                 # monotonic response must all survive the machine code.
@@ -271,6 +273,38 @@ def validate_feedback(image, profile):
                 call(0x0800a8f8, 0x20010000, len(report), 1)
                 large, little = e.uc.mem_read(0x20000668, 2)
                 check(bool(large) == bool(big) and bool(little) == bool(small), 'tester_Switch_rumble_real_parser')
+            if minimum:
+                # Weak real HD packets, including low-frequency-only effects,
+                # must reach the Xiaomi feature report through both stock USB
+                # decoding and the real Switch output poller. Mock Bluetooth
+                # transport and controller identification only.
+                neutral = bytes.fromhex('00014040')
+                low_only = bytes.fromhex('0001c04c')
+                reports = ((switch_rumble(1, 0.01, 0), False, True),
+                           (switch_rumble(1, 0, 0.01), True, False),
+                           (b'\x10\x01'+low_only+neutral, True, False),
+                           (b'\x10\x01'+neutral+low_only, False, True),
+                           (switch_rumble(1, 0, 0), False, False))
+                def identify(uc, pc, size, data):
+                    if pc == 0x08010728:
+                        uc.reg_write(UC_ARM_REG_R0, 24)
+                        uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
+                hook = e.uc.hook_add(UC_HOOK_CODE, identify)
+                try:
+                    for report, big_on, small_on in reports:
+                        reset()
+                        e.uc.mem_write(0x200010b7, b'\x02')
+                        e.uc.mem_write(0x20001164, struct.pack('<I', 1000))
+                        e.uc.mem_write(0x20010000, report+bytes(128-len(report)))
+                        call(0x0800a8f8, 0x20010000, len(report), 1)
+                        large, little = e.uc.mem_read(0x20000668, 2)
+                        check(bool(large) == big_on and bool(little) == small_on,
+                              'weak_HF_and_LF_effects_decode_independently')
+                        call(0x0800a5d4)
+                        check(packets == [bytes((0x53, 0x20, strength(little), strength(large)))],
+                              'weak_effect_floor_real_USB_to_Bluetooth')
+                finally:
+                    e.uc.hook_del(hook)
     finally:
         e.uc.hook_del(bt)
     return checks

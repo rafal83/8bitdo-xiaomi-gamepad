@@ -30,11 +30,14 @@ DEFAULT_PROFILE = {
     'mi_pulse_ms': 120, 'battery': True, 'reconnect': True,
     'accelerometer': True, 'rumble': True,
     'switch_rumble_gain': 200,
+    'switch_rumble_minimum': 0,
 }
 
 
 def validate_profile(value):
     """Reject ambiguous or forward-incompatible profiles before assembling anything."""
+    if type(value) is dict and 'switch_rumble_minimum' not in value:
+        value = {**value, 'switch_rumble_minimum': 0}
     if type(value) is dict and 'switch_rumble_gain' not in value:
         # Existing profiles retain their original motor strengths.
         value = {**value, 'switch_rumble_gain': 100}
@@ -72,6 +75,9 @@ def validate_profile(value):
     gain = value['switch_rumble_gain']
     if type(gain) is not int or not 100 <= gain <= 300 or gain % 25:
         raise ValueError('L’intensite des vibrations Switch doit aller de 100 a 300 %, par pas de 25 %.')
+    minimum = value['switch_rumble_minimum']
+    if type(minimum) is not int or not 0 <= minimum <= 100:
+        raise ValueError('Le minimum des vibrations Switch doit etre un entier de 0 a 100 %.')
     result = deepcopy(value)
     result['buttons'] = deepcopy(buttons)
     result['name'] = result['name'].strip()
@@ -279,6 +285,7 @@ def bundle_instructions(profile, checks):
         instructions += (
             f"\nMouvement et vibrations : accelerometre={profile['accelerometer']}, vibrations={profile['rumble']}.\n"
             f"Intensite des vibrations Switch : {profile['switch_rumble_gain']} % (100 % = niveau d'origine).\n"
+            f"Minimum Switch pour un effet non nul : {profile['switch_rumble_minimum']} % (0 % = aucun minimum).\n"
             "L'image occupe 1 Kio supplementaire ; la limite basse du stockage interne est relevee.\n"
             "Des reglages memorises par le 8BitDo peuvent etre perdus lors du premier flash.\n"
             "Les donnees d'acceleration sont brutes, sans gyroscope. Echelle et orientation a valider.\n"
